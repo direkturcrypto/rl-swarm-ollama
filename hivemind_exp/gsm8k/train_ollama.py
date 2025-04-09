@@ -72,15 +72,38 @@ class OllamaGRPORunner(GRPORunner):
         if not initial_peers:
             logger.info("Cannot locate on-chain initial peers; running alone.")
 
-        dht = hivemind.DHT(start=True, **self._dht_kwargs(grpo_args))
-        if initial_peers:
-            logger.info(f"🐝 Joining swarm with initial_peers = {initial_peers}")
+        try:
+            # Increase timeout and add more parameters for stability
+            dht = hivemind.DHT(
+                start=True,
+                wait_timeout=30.0,  # Increase timeout to 30 seconds
+                initial_peers=initial_peers,
+                client_mode=True,  # Run in client mode for better stability
+                **self._dht_kwargs(grpo_args)
+            )
+            
+            if initial_peers:
+                logger.info(f"🐝 Joining swarm with initial_peers = {initial_peers}")
+                # Wait a bit for connection establishment
+                import asyncio
+                asyncio.get_event_loop().run_until_complete(asyncio.sleep(2))
 
-        peer_id = str(dht.peer_id)
-        self.name = self._get_animal_name(peer_id)
-        self.register_peer(peer_id)
-        return dht
-        
+            peer_id = str(dht.peer_id)
+            self.name = self._get_animal_name(peer_id)
+            self.register_peer(peer_id)
+            return dht
+            
+        except hivemind.p2p.p2p_daemon_bindings.utils.P2PDaemonError as e:
+            logger.warning(f"Failed to initialize DHT with error: {e}")
+            logger.info("Continuing without DHT...")
+            self.name = "solo_runner"
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error during DHT setup: {e}")
+            logger.info("Continuing without DHT...")
+            self.name = "solo_runner"
+            return None
+
     def generate_response(self, prompt: str, max_tokens: int = 1024) -> str:
         """Menghasilkan respons dari Ollama API"""
         try:
@@ -135,9 +158,13 @@ class OllamaGRPORunner(GRPORunner):
         start_time = datetime.now()
         
         # Setup DHT if using coordinator
+        dht = None
         if hasattr(self, 'coordinator'):
             dht = self.setup_dht(grpo_args)
-            logger.info(f"DHT setup complete with peer_id: {dht.peer_id}")
+            if dht:
+                logger.info(f"DHT setup complete with peer_id: {dht.peer_id}")
+            else:
+                logger.warning("DHT setup failed, continuing in solo mode")
         
         # Dapatkan dataset
         logger.info(f"Starting training {start_time.strftime('%Y-%m-%d %H:%M:%S')} for {training_args.num_train_epochs} epochs")

@@ -123,7 +123,6 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     cleanup() {
         echo "Shutting down server..."
         kill $SERVER_PID
-        rm -r modal-login/temp-data/*.json
         exit 0
     }
 
