@@ -39,13 +39,13 @@ class TrainingArguments:
     logging_steps: int
     save_steps: int
     seed: int
-    public_maddr: str
-    host_maddr: str
     max_rounds: int
     hf_token: str = "None"
     identity_path: str = ""
     modal_org_id: str = ""
     initial_peers: str = ""
+    public_maddr: str = ""
+    host_maddr: str = ""
 
 def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
@@ -126,26 +126,31 @@ def main():
     parser.add_argument("--public_maddr", type=str, default="", help="Public multi-address")
     parser.add_argument("--initial_peers", type=str, default="", help="Initial peers")
     parser.add_argument("--host_maddr", type=str, default="", help="Host multi-address")
-    args = parser.parse_args()
+    cli_args = parser.parse_args()
     
     # Load config
-    config = load_config(args.config)
+    config_dict = load_config(cli_args.config)
     
-    # Remove any keys that will be provided by command line args
-    cmd_line_args = {
-        "hf_token": args.hf_token,
-        "identity_path": args.identity_path,
-        "modal_org_id": args.modal_org_id,
-        "public_maddr": args.public_maddr,
-        "initial_peers": args.initial_peers,
-        "host_maddr": args.host_maddr
+    # Override with command line arguments where provided
+    override_args = {
+        "hf_token": cli_args.hf_token if cli_args.hf_token != "None" else config_dict.get("hf_token", "None"),
+        "identity_path": cli_args.identity_path or config_dict.get("identity_path", ""),
+        "modal_org_id": cli_args.modal_org_id or config_dict.get("modal_org_id", ""),
+        "public_maddr": cli_args.public_maddr or config_dict.get("public_maddr", ""),
+        "initial_peers": cli_args.initial_peers or config_dict.get("initial_peers", ""),
+        "host_maddr": cli_args.host_maddr or config_dict.get("host_maddr", "")
     }
     
-    # Filter out empty values
-    cmd_line_args = {k: v for k, v in cmd_line_args.items() if v}
+    # Remove the keys that will be overridden from config_dict
+    for key in override_args:
+        if key in config_dict:
+            config_dict.pop(key)
+    
+    # Merge config_dict and override_args
+    all_args = {**config_dict, **override_args}
     
     # Create training arguments
-    training_args = TrainingArguments(**config, **cmd_line_args)
+    training_args = TrainingArguments(**all_args)
     
     trainer = OllamaTrainer(training_args)
     trainer.train()
