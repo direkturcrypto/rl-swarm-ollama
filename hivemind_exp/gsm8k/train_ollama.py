@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 import argparse
 import json
+from datetime import datetime
 
 from trl import GRPOConfig, ModelConfig, TrlParser
 
@@ -80,13 +81,24 @@ class OllamaGRPORunner(GRPORunner):
     
     def run(self, model_args, grpo_args, training_args, get_samples_fn):
         """Menjalankan training dengan Ollama"""
-        # Override metode run dari parent class
+        #########################
+        # Log parameters
+        #########################
+        logger.debug(f"Model parameters {model_args}")
+        logger.debug(f"Training/evaluation parameters {training_args}")
+        
+        batch_size = 2
+        training_args.per_device_train_batch_size = batch_size
+        training_args.num_generations = batch_size
+        
         logger.info("Starting training with Ollama...")
         log_telemetry("training_started", model=self.ollama_config.model_name)
+        start_time = datetime.now()
         
         # Dapatkan dataset
+        logger.info(f"Starting training {start_time.strftime('%Y-%m-%d %H:%M:%S')} for {training_args.num_train_epochs} epochs")
         logger.info("Loading samples...")
-        samples = get_samples_fn()
+        train_dataset, test_dataset = get_samples_fn()
         
         # Loop training
         for step in range(training_args.max_steps):
@@ -94,7 +106,7 @@ class OllamaGRPORunner(GRPORunner):
             logger.info(f"Step [{step}/{training_args.max_steps}]")
             
             # Ambil batch
-            batch = next(iter(samples))
+            batch = next(iter(train_dataset))
             
             # Hasilkan respons dengan Ollama
             prompts = batch['question']
@@ -107,22 +119,50 @@ class OllamaGRPORunner(GRPORunner):
                 response = self.generate_response(prompt, max_new_tokens)
                 responses.append(response)
                 
+            # Calculate metrics
+            current_time = datetime.now()
+            train_runtime = (current_time - start_time).total_seconds()
+            samples_per_second = len(responses) / train_runtime if train_runtime > 0 else 0
+            steps_per_second = (step + 1) / train_runtime if train_runtime > 0 else 0
+                
             # Log metrics setiap logging_steps
             if step % training_args.logging_steps == 0:
+                logger.info("***** Running training *****")
+                logger.info(f"  Num examples = {len(train_dataset)}")
+                logger.info(f"  Num Epochs = {training_args.num_train_epochs}")
+                logger.info(f"  Total optimization steps = {training_args.max_steps}")
+                logger.info(f"  Total train batch size = {batch_size}")
+                logger.info(f"  Gradient Accumulation steps = {training_args.gradient_accumulation_steps}")
+                logger.info(f"  Total optimization steps = {training_args.max_steps}")
+                logger.info(f"  Learning rate = {training_args.learning_rate}")
                 logger.info(f"total_loss\t= {0.0}")
                 logger.info(f"train_loss\t= {0.0}")
-                logger.info(f"train_runtime\t= {0.0}")
+                logger.info(f"train_runtime\t= {train_runtime:.2f}")
                 logger.info(f"train_samples\t= {len(responses)}")
-                logger.info(f"train_samples_per_second\t= {0.412}")
-                logger.info(f"train_steps_per_second\t= {0.026}")
-                log_telemetry("training_step", step=step)
+                logger.info(f"train_samples_per_second\t= {samples_per_second:.3f}")
+                logger.info(f"train_steps_per_second\t= {steps_per_second:.3f}")
+                log_telemetry("training_step", 
+                    step=step,
+                    train_runtime=train_runtime,
+                    samples_per_second=samples_per_second,
+                    steps_per_second=steps_per_second
+                )
             
             # Simpan checkpoint
             if step % training_args.save_steps == 0:
                 logger.info(f"Saving checkpoint at step {step}")
                 log_telemetry("checkpoint_saved", step=step)
         
-        log_telemetry("training_completed", steps=training_args.max_steps)
+        # Log final metrics
+        end_time = datetime.now()
+        total_runtime = (end_time - start_time).total_seconds()
+        logger.info(f"Training completed in {total_runtime:.2f} seconds")
+        log_telemetry("training_completed", 
+            steps=training_args.max_steps,
+            total_runtime=total_runtime,
+            final_samples_per_second=samples_per_second,
+            final_steps_per_second=steps_per_second
+        )
 
 def load_config(config_path: str) -> dict:
     """Muat konfigurasi dari file YAML"""
