@@ -80,7 +80,9 @@ class OllamaGRPORunner(GRPORunner):
             
             # Hasilkan respons dengan Ollama
             prompts = batch['question']
-            responses = [self.generate_response(prompt, training_args.max_new_tokens) for prompt in prompts]
+            # Use default max_new_tokens since it's not in GRPOConfig
+            max_new_tokens = getattr(training_args, 'max_new_tokens', 1024)
+            responses = [self.generate_response(prompt, max_new_tokens) for prompt in prompts]
             
             # Log hasil
             if step % training_args.logging_steps == 0:
