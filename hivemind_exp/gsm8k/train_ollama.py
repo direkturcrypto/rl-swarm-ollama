@@ -47,6 +47,7 @@ class TrainingArguments:
     public_maddr: str = ""
     host_maddr: str = ""
     torch_dtype: str = "float16"
+    logging_strategy: str = "steps"
     # Add extra field for any additional parameters that might be in the config
     extra_args: Dict[str, Any] = field(default_factory=dict)
 
