@@ -60,8 +60,14 @@ class OllamaGRPORunner(GRPORunner):
     def register_peer(self, peer_id):
         """Register peer with coordinator if available"""
         if hasattr(self, 'coordinator'):
-            logger.info(f"Registering self with peer ID: {peer_id}")
-            self.coordinator.register_peer(peer_id)
+            try:
+                logger.info(f"Registering self with peer ID: {peer_id}")
+                # Convert peer_id to string and ensure it's properly formatted
+                peer_id_str = str(peer_id).strip()
+                self.coordinator.register_peer(peer_id_str)
+            except Exception as e:
+                logger.error(f"Error registering peer: {e}")
+                logger.info("Will continue without peer registration")
 
     def setup_dht(self, grpo_args):
         """Setup DHT with peer registration"""
@@ -109,7 +115,14 @@ class OllamaGRPORunner(GRPORunner):
                     except json.JSONDecodeError:
                         continue
             
-            return full_response.strip()
+            # Clean up response
+            full_response = full_response.strip()
+            if not full_response:
+                logger.warning("Empty response received from Ollama API")
+                return ""
+                
+            return full_response
+            
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return ""
@@ -118,8 +131,26 @@ class OllamaGRPORunner(GRPORunner):
         """Submit winners to coordinator with proper error handling"""
         if hasattr(self, 'coordinator'):
             try:
-                logger.info(f"Submitting winners with scores: {scores}")
-                self.coordinator.submit_winners(responses, scores)
+                # Format responses and scores properly
+                formatted_responses = []
+                formatted_scores = []
+                
+                for response, score in zip(responses, scores):
+                    # Ensure response is a valid string
+                    if response and isinstance(response, str):
+                        # Clean up response: remove extra whitespace and ensure it's not empty
+                        cleaned_response = response.strip()
+                        if cleaned_response:
+                            formatted_responses.append(cleaned_response)
+                            # Ensure score is a float
+                            formatted_scores.append(float(score))
+                
+                if formatted_responses and formatted_scores:
+                    logger.info(f"Submitting {len(formatted_responses)} winners with scores: {formatted_scores}")
+                    self.coordinator.submit_winners(formatted_responses, formatted_scores)
+                else:
+                    logger.warning("No valid responses to submit")
+                    
             except Exception as e:
                 logger.error(f"Error submitting winners: {e}")
                 logger.info("Will try to submit again in next checkpoint")
