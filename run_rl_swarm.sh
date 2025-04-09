@@ -38,6 +38,25 @@ fi
 # Activate virtual environment
 source "$VENV_DIR/bin/activate"
 
+# Upgrade pip in virtual environment
+echo "Upgrading pip..."
+python -m pip install --upgrade pip
+
+# Install requirements in virtual environment
+echo "Installing requirements..."
+pip install -r "$ROOT"/requirements-hivemind.txt
+pip install -r "$ROOT"/requirements.txt
+
+# Install transformers explicitly
+echo "Installing transformers..."
+pip install transformers>=4.46.0
+
+# Install other required packages explicitly
+echo "Installing additional required packages..."
+pip install torch
+pip install datasets
+pip install ollama-python>=0.1.6
+
 while true; do
     read -p "Would you like to connect to the Testnet? [Y/n] " yn
     yn=${yn:-Y}  # Default to "Y" if the user presses Enter
@@ -132,11 +151,6 @@ if ! curl -s "$REMOTE_OLLAMA_URL/api/tags" | grep -q "qwen2.5:0.5b"; then
 else
     echo "Model already exists on remote server"
 fi
-
-# Install requirements in virtual environment
-echo "Installing requirements..."
-pip install -r "$ROOT"/requirements-hivemind.txt
-pip install -r "$ROOT"/requirements.txt
 
 if ! which nvidia-smi; then
    #You don't have a NVIDIA GPU
