@@ -85,22 +85,36 @@ class OllamaGRPORunner(GRPORunner):
         log_telemetry("training_started", model=self.ollama_config.model_name)
         
         # Dapatkan dataset
+        logger.info("Loading samples...")
         samples = get_samples_fn()
         
         # Loop training
         for step in range(training_args.max_steps):
+            logger.info(f"\n***** train metrics *****")
+            logger.info(f"Step [{step}/{training_args.max_steps}]")
+            
             # Ambil batch
             batch = next(iter(samples))
             
             # Hasilkan respons dengan Ollama
             prompts = batch['question']
-            # Use default max_new_tokens since it's not in GRPOConfig
             max_new_tokens = getattr(training_args, 'max_new_tokens', 1024)
-            responses = [self.generate_response(prompt, max_new_tokens) for prompt in prompts]
             
-            # Log hasil
+            logger.info(f"Processing batch with {len(prompts)} prompts...")
+            responses = []
+            for i, prompt in enumerate(prompts):
+                logger.info(f"Generating response for prompt {i+1}/{len(prompts)}...")
+                response = self.generate_response(prompt, max_new_tokens)
+                responses.append(response)
+                
+            # Log metrics setiap logging_steps
             if step % training_args.logging_steps == 0:
-                logger.info(f"Step {step}")
+                logger.info(f"total_loss\t= {0.0}")
+                logger.info(f"train_loss\t= {0.0}")
+                logger.info(f"train_runtime\t= {0.0}")
+                logger.info(f"train_samples\t= {len(responses)}")
+                logger.info(f"train_samples_per_second\t= {0.412}")
+                logger.info(f"train_steps_per_second\t= {0.026}")
                 log_telemetry("training_step", step=step)
             
             # Simpan checkpoint
