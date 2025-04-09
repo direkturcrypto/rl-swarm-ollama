@@ -42,11 +42,13 @@ class TrainingArguments:
     public_maddr: str
     host_maddr: str
     max_rounds: int
+    hf_token: str = "None"
+    identity_path: str = ""
+    modal_org_id: str = ""
 
-def load_config(config_path: str) -> TrainingArguments:
+def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return TrainingArguments(**config)
+        return yaml.safe_load(f)
 
 class OllamaTrainer:
     def __init__(self, args: TrainingArguments):
@@ -57,7 +59,7 @@ class OllamaTrainer:
         
         # Initialize hivemind
         self.dht = hivemind.DHT(
-            initial_peers=[args.public_maddr],
+            initial_peers=[args.public_maddr] if args.public_maddr else [],
             host_maddr=args.host_maddr,
             start=True
         )
@@ -111,9 +113,27 @@ class OllamaTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
+    parser.add_argument("--hf_token", type=str, default="None", help="Hugging Face token")
+    parser.add_argument("--identity_path", type=str, default="", help="Path to identity file")
+    parser.add_argument("--modal_org_id", type=str, default="", help="Modal organization ID")
+    parser.add_argument("--public_maddr", type=str, default="", help="Public multi-address")
+    parser.add_argument("--initial_peers", type=str, default="", help="Initial peers")
+    parser.add_argument("--host_maddr", type=str, default="", help="Host multi-address")
     args = parser.parse_args()
     
-    training_args = load_config(args.config)
+    # Load config
+    config = load_config(args.config)
+    
+    # Create training arguments
+    training_args = TrainingArguments(
+        **config,
+        hf_token=args.hf_token,
+        identity_path=args.identity_path,
+        modal_org_id=args.modal_org_id,
+        public_maddr=args.public_maddr,
+        host_maddr=args.host_maddr
+    )
+    
     trainer = OllamaTrainer(training_args)
     trainer.train()
 
