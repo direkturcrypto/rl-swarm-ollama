@@ -9,4 +9,4 @@ tensorboard
 transformers>=4.46.0
 trl==0.15.2
 web3
-ollama-python>=0.1.6
+ollama-python==0.1.2
