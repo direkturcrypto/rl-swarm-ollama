@@ -1,16 +1,25 @@
-import os
-import yaml
-import torch
 import logging
 import requests
-import json
-from typing import Optional, Dict, Any
+import colorlog
+import yaml
 from dataclasses import dataclass, field
-from transformers import AutoTokenizer
-from datasets import load_dataset
-import hivemind
-from hivemind.utils.logging import get_logger
+from typing import Dict, Any, Optional, List
 import argparse
+
+from trl import GRPOConfig, ModelConfig, TrlParser
+
+from hivemind_exp.chain_utils import (
+    ModalSwarmCoordinator,
+    WalletSwarmCoordinator,
+    setup_web3,
+)
+from hivemind_exp.gsm8k.generate_prompts import get_stage1_samples
+from hivemind_exp.runner.gensyn.testnet_grpo_runner import (
+    TestnetGRPOArguments,
+    TestnetGRPORunner,
+)
+from hivemind_exp.runner.grpo_runner import GRPOArguments, GRPORunner
+from hivemind.utils.logging import get_logger
 
 # Setup logging
 logger = get_logger(__name__)
@@ -21,76 +30,27 @@ def log_telemetry(event_name, **kwargs):
     logger.info(f"TELEMETRY: {event_name} - {kwargs}")
 
 @dataclass
-class TrainingArguments:
+class OllamaConfig:
+    """Konfigurasi untuk Ollama API"""
+    base_url: str
     model_name: str
-    ollama_base_url: str
-    dataset_id_or_path: str
-    max_steps: int
-    per_device_train_batch_size: int
-    gradient_accumulation_steps: int
-    learning_rate: float
-    lr_scheduler_type: str
-    warmup_ratio: float
-    beta: float
-    max_prompt_length: int
-    max_completion_length: int
-    num_generations: int
-    output_dir: str
-    logging_steps: int
-    save_steps: int
-    seed: int
-    max_rounds: int
-    hf_token: str = "None"
-    identity_path: str = ""
-    modal_org_id: str = ""
-    initial_peers: str = ""
-    public_maddr: str = ""
-    host_maddr: str = ""
-    torch_dtype: str = "float16"
-    logging_strategy: str = "steps"
-    # Add extra field for any additional parameters that might be in the config
-    extra_args: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        # Handle any extra arguments that were passed but not defined in the dataclass
-        known_attrs = set(self.__annotations__.keys())
-        for key, value in list(vars(self).items()):
-            if key not in known_attrs and key != "extra_args":
-                self.extra_args[key] = value
-                delattr(self, key)
-
-def load_config(config_path: str) -> dict:
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-class OllamaTrainer:
-    def __init__(self, args: TrainingArguments):
-        self.args = args
-        self.base_url = args.ollama_base_url
-        self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen-0.5B")
-        self.dataset = load_dataset(args.dataset_id_or_path)
+class OllamaGRPORunner(GRPORunner):
+    """GRPORunner yang menggunakan Ollama API alih-alih model lokal"""
+    
+    def __init__(self, ollama_config: OllamaConfig, coordinator=None):
+        super().__init__(coordinator)
+        self.ollama_config = ollama_config
         
-        # Initialize hivemind
-        initial_peers = []
-        if args.public_maddr:
-            initial_peers.append(args.public_maddr)
-        if args.initial_peers:
-            initial_peers.append(args.initial_peers)
-            
-        self.dht = hivemind.DHT(
-            initial_peers=initial_peers,
-            host_maddr=args.host_maddr,
-            start=True
-        )
-        
-    def generate_response(self, prompt: str) -> str:
+    def generate_response(self, prompt: str, max_tokens: int = 1024) -> str:
+        """Menghasilkan respons dari Ollama API"""
         try:
             response = requests.post(
-                f"{self.base_url}/api/generate",
+                f"{self.ollama_config.base_url}/api/generate",
                 json={
-                    "model": self.args.model_name,
+                    "model": self.ollama_config.model_name,
                     "prompt": prompt,
-                    "max_tokens": self.args.max_completion_length,
+                    "max_tokens": max_tokens,
                     "temperature": 0.7
                 }
             )
@@ -100,36 +60,52 @@ class OllamaTrainer:
             logger.error(f"Error generating response: {e}")
             return ""
     
-    def train_step(self, batch):
-        # Implement your training logic here
-        # This is a simplified version - you'll need to adapt it to your specific needs
-        prompts = batch['question']
-        responses = [self.generate_response(prompt) for prompt in prompts]
-        
-        # Calculate rewards and update model
-        # This part depends on your specific reward function and update strategy
-        
-        return {"loss": 0.0}  # Placeholder
-    
-    def train(self):
+    def run(self, model_args, grpo_args, training_args, get_samples_fn):
+        """Menjalankan training dengan Ollama"""
+        # Override metode run dari parent class
         logger.info("Starting training with Ollama...")
-        log_telemetry("training_started", model=self.args.model_name)
+        log_telemetry("training_started", model=self.ollama_config.model_name)
         
-        for step in range(self.args.max_steps):
-            batch = next(iter(self.dataset['train']))
-            metrics = self.train_step(batch)
+        # Dapatkan dataset
+        samples = get_samples_fn()
+        
+        # Loop training
+        for step in range(training_args.max_steps):
+            # Ambil batch
+            batch = next(iter(samples))
             
-            if step % self.args.logging_steps == 0:
-                logger.info(f"Step {step}: {metrics}")
-                log_telemetry("training_step", step=step, metrics=metrics)
+            # Hasilkan respons dengan Ollama
+            prompts = batch['question']
+            responses = [self.generate_response(prompt, training_args.max_new_tokens) for prompt in prompts]
             
-            if step % self.args.save_steps == 0:
-                # Save checkpoint logic here
+            # Log hasil
+            if step % training_args.logging_steps == 0:
+                logger.info(f"Step {step}")
+                log_telemetry("training_step", step=step)
+            
+            # Simpan checkpoint
+            if step % training_args.save_steps == 0:
+                logger.info(f"Saving checkpoint at step {step}")
                 log_telemetry("checkpoint_saved", step=step)
         
-        log_telemetry("training_completed", steps=self.args.max_steps)
+        log_telemetry("training_completed", steps=training_args.max_steps)
+
+def load_config(config_path: str) -> dict:
+    """Muat konfigurasi dari file YAML"""
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 def main():
+    # Setup logging.
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    handler = colorlog.StreamHandler()
+    handler.setFormatter(
+        colorlog.ColoredFormatter("%(light_red)s%(levelname)s:%(name)s:%(message)s")
+    )
+    root_logger.addHandler(handler)
+
+    # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
     parser.add_argument("--hf_token", type=str, default="None", help="Hugging Face token")
@@ -143,29 +119,31 @@ def main():
     # Load config
     config_dict = load_config(cli_args.config)
     
-    # Override with command line arguments where provided
-    override_args = {
-        "hf_token": cli_args.hf_token if cli_args.hf_token != "None" else config_dict.get("hf_token", "None"),
-        "identity_path": cli_args.identity_path or config_dict.get("identity_path", ""),
-        "modal_org_id": cli_args.modal_org_id or config_dict.get("modal_org_id", ""),
-        "public_maddr": cli_args.public_maddr or config_dict.get("public_maddr", ""),
-        "initial_peers": cli_args.initial_peers or config_dict.get("initial_peers", ""),
-        "host_maddr": cli_args.host_maddr or config_dict.get("host_maddr", "")
-    }
+    # Setup TRL parser untuk kompatibilitas dengan runner
+    parser = TrlParser((ModelConfig, GRPOArguments, TestnetGRPOArguments, GRPOConfig))
+    model_args, grpo_args, testnet_args, training_args = parser.parse_args_and_config()
     
-    # Remove the keys that will be overridden from config_dict
-    for key in override_args:
-        if key in config_dict:
-            config_dict.pop(key)
-    
-    # Merge config_dict and override_args
-    all_args = {**config_dict, **override_args}
-    
-    # Create training arguments
-    training_args = TrainingArguments(**all_args)
-    
-    trainer = OllamaTrainer(training_args)
-    trainer.train()
+    # Setup Ollama config
+    ollama_config = OllamaConfig(
+        base_url=config_dict.get("ollama_base_url", "http://107.222.215.224:36001"),
+        model_name=config_dict.get("model_name", "qwen2.5:0.5b")
+    )
+
+    # Run main training loop with appropriate coordinator
+    if org_id := cli_args.modal_org_id or testnet_args.modal_org_id:
+        runner = OllamaGRPORunner(
+            ollama_config,
+            coordinator=ModalSwarmCoordinator(org_id, web3=setup_web3())
+        )
+    elif priv_key := testnet_args.wallet_private_key:
+        runner = OllamaGRPORunner(
+            ollama_config,
+            coordinator=WalletSwarmCoordinator(priv_key, web3=setup_web3())
+        )
+    else:
+        runner = OllamaGRPORunner(ollama_config)
+
+    runner.run(model_args, grpo_args, training_args, get_stage1_samples)
 
 if __name__ == "__main__":
     main() 
