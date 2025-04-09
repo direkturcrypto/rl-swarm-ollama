@@ -5,6 +5,7 @@ import yaml
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 import argparse
+import json
 
 from trl import GRPOConfig, ModelConfig, TrlParser
 
@@ -59,7 +60,20 @@ class OllamaGRPORunner(GRPORunner):
                 }
             )
             response.raise_for_status()
-            return response.json()['response']
+            
+            # Ollama API returns a stream of JSON objects, one per line
+            # We need to get the last response which contains the complete text
+            full_response = ""
+            for line in response.text.strip().split('\n'):
+                if line:
+                    try:
+                        chunk = json.loads(line)
+                        if 'response' in chunk:
+                            full_response += chunk['response']
+                    except json.JSONDecodeError:
+                        continue
+            
+            return full_response.strip()
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return ""
