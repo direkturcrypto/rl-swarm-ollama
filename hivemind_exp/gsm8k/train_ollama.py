@@ -48,6 +48,8 @@ class OllamaGRPORunner(GRPORunner):
         if coordinator:
             self.coordinator = coordinator
         self.ollama_config = ollama_config
+        self.best_responses = []
+        self.best_scores = []
         
     def get_initial_peers(self) -> list[str]:
         """Get initial peers from coordinator if available"""
@@ -112,6 +114,16 @@ class OllamaGRPORunner(GRPORunner):
             logger.error(f"Error generating response: {e}")
             return ""
     
+    def submit_winners(self, responses, scores):
+        """Submit winners to coordinator with proper error handling"""
+        if hasattr(self, 'coordinator'):
+            try:
+                logger.info(f"Submitting winners with scores: {scores}")
+                self.coordinator.submit_winners(responses, scores)
+            except Exception as e:
+                logger.error(f"Error submitting winners: {e}")
+                logger.info("Will try to submit again in next checkpoint")
+        
     def run(self, model_args, grpo_args, training_args, get_samples_fn):
         """Menjalankan training dengan Ollama"""
         # Setup initial peers if using coordinator
@@ -174,6 +186,9 @@ class OllamaGRPORunner(GRPORunner):
                 if score > best_score:
                     best_score = score
                     best_response = response
+                    # Add to best responses list
+                    self.best_responses.append(best_response)
+                    self.best_scores.append(best_score)
                 
             # Calculate metrics
             current_time = datetime.now()
@@ -209,15 +224,19 @@ class OllamaGRPORunner(GRPORunner):
             # Simpan checkpoint dan submit winner jika menggunakan coordinator
             if step % training_args.save_steps == 0:
                 logger.info(f"Saving checkpoint at step {step}")
-                if hasattr(self, 'coordinator'):
-                    logger.info(f"Submitting best response with score {best_score}")
-                    self.coordinator.submit_winners([best_response], [best_score])
+                if hasattr(self, 'coordinator') and self.best_responses:
+                    # Submit all accumulated best responses
+                    logger.info(f"Submitting {len(self.best_responses)} best responses")
+                    self.submit_winners(self.best_responses, self.best_scores)
+                    # Clear the lists after submission
+                    self.best_responses = []
+                    self.best_scores = []
                 log_telemetry("checkpoint_saved", step=step)
         
-        # Submit final winner if using coordinator
-        if hasattr(self, 'coordinator') and best_response is not None:
-            logger.info(f"Submitting final best response with score {best_score}")
-            self.coordinator.submit_winners([best_response], [best_score])
+        # Submit final winners if using coordinator
+        if hasattr(self, 'coordinator') and self.best_responses:
+            logger.info(f"Submitting final {len(self.best_responses)} best responses")
+            self.submit_winners(self.best_responses, self.best_scores)
         
         # Log final metrics
         end_time = datetime.now()
