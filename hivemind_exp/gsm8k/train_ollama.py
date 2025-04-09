@@ -39,7 +39,11 @@ class OllamaGRPORunner(GRPORunner):
     """GRPORunner yang menggunakan Ollama API alih-alih model lokal"""
     
     def __init__(self, ollama_config: OllamaConfig, coordinator=None):
-        super().__init__(coordinator)
+        # Initialize parent class without coordinator first
+        super().__init__()
+        # Then set coordinator if provided
+        if coordinator:
+            self.coordinator = coordinator
         self.ollama_config = ollama_config
         
     def generate_response(self, prompt: str, max_tokens: int = 1024) -> str:
