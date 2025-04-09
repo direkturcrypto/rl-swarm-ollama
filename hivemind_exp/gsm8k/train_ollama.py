@@ -10,10 +10,15 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 import hivemind
 from hivemind.utils.logging import get_logger
-from hivemind.utils.telemetry import log_telemetry
 import argparse
 
+# Setup logging
 logger = get_logger(__name__)
+
+# Simple telemetry function
+def log_telemetry(event_name, **kwargs):
+    """Simple telemetry function to log events"""
+    logger.info(f"TELEMETRY: {event_name} - {kwargs}")
 
 @dataclass
 class TrainingArguments:
@@ -87,6 +92,7 @@ class OllamaTrainer:
     
     def train(self):
         logger.info("Starting training with Ollama...")
+        log_telemetry("training_started", model=self.args.model_name)
         
         for step in range(self.args.max_steps):
             batch = next(iter(self.dataset['train']))
@@ -94,10 +100,13 @@ class OllamaTrainer:
             
             if step % self.args.logging_steps == 0:
                 logger.info(f"Step {step}: {metrics}")
+                log_telemetry("training_step", step=step, metrics=metrics)
             
             if step % self.args.save_steps == 0:
                 # Save checkpoint logic here
-                pass
+                log_telemetry("checkpoint_saved", step=step)
+        
+        log_telemetry("training_completed", steps=self.args.max_steps)
 
 def main():
     parser = argparse.ArgumentParser()
