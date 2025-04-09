@@ -45,6 +45,7 @@ class TrainingArguments:
     hf_token: str = "None"
     identity_path: str = ""
     modal_org_id: str = ""
+    initial_peers: str = ""
 
 def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
@@ -58,8 +59,14 @@ class OllamaTrainer:
         self.dataset = load_dataset(args.dataset_id_or_path)
         
         # Initialize hivemind
+        initial_peers = []
+        if args.public_maddr:
+            initial_peers.append(args.public_maddr)
+        if args.initial_peers:
+            initial_peers.append(args.initial_peers)
+            
         self.dht = hivemind.DHT(
-            initial_peers=[args.public_maddr] if args.public_maddr else [],
+            initial_peers=initial_peers,
             host_maddr=args.host_maddr,
             start=True
         )
@@ -124,15 +131,21 @@ def main():
     # Load config
     config = load_config(args.config)
     
+    # Remove any keys that will be provided by command line args
+    cmd_line_args = {
+        "hf_token": args.hf_token,
+        "identity_path": args.identity_path,
+        "modal_org_id": args.modal_org_id,
+        "public_maddr": args.public_maddr,
+        "initial_peers": args.initial_peers,
+        "host_maddr": args.host_maddr
+    }
+    
+    # Filter out empty values
+    cmd_line_args = {k: v for k, v in cmd_line_args.items() if v}
+    
     # Create training arguments
-    training_args = TrainingArguments(
-        **config,
-        hf_token=args.hf_token,
-        identity_path=args.identity_path,
-        modal_org_id=args.modal_org_id,
-        public_maddr=args.public_maddr,
-        host_maddr=args.host_maddr
-    )
+    training_args = TrainingArguments(**config, **cmd_line_args)
     
     trainer = OllamaTrainer(training_args)
     trainer.train()
