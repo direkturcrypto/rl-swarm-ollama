@@ -211,13 +211,13 @@ class OllamaGRPORunner(GRPORunner):
                 logger.info(f"Saving checkpoint at step {step}")
                 if hasattr(self, 'coordinator'):
                     logger.info(f"Submitting best response with score {best_score}")
-                    self.coordinator.submit_winner(best_response, best_score)
+                    self.coordinator.submit_winners([best_response], [best_score])
                 log_telemetry("checkpoint_saved", step=step)
         
         # Submit final winner if using coordinator
         if hasattr(self, 'coordinator') and best_response is not None:
             logger.info(f"Submitting final best response with score {best_score}")
-            self.coordinator.submit_winner(best_response, best_score)
+            self.coordinator.submit_winners([best_response], [best_score])
         
         # Log final metrics
         end_time = datetime.now()
