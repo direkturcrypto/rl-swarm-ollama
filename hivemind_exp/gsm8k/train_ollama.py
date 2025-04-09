@@ -4,8 +4,8 @@ import torch
 import logging
 import requests
 import json
-from typing import Optional
-from dataclasses import dataclass
+from typing import Optional, Dict, Any
+from dataclasses import dataclass, field
 from transformers import AutoTokenizer
 from datasets import load_dataset
 import hivemind
@@ -46,6 +46,17 @@ class TrainingArguments:
     initial_peers: str = ""
     public_maddr: str = ""
     host_maddr: str = ""
+    torch_dtype: str = "float16"
+    # Add extra field for any additional parameters that might be in the config
+    extra_args: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        # Handle any extra arguments that were passed but not defined in the dataclass
+        known_attrs = set(self.__annotations__.keys())
+        for key, value in list(vars(self).items()):
+            if key not in known_attrs and key != "extra_args":
+                self.extra_args[key] = value
+                delattr(self, key)
 
 def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
