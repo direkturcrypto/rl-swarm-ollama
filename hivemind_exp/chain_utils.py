@@ -87,43 +87,80 @@ class ModalSwarmCoordinator(SwarmCoordinator):
 
     def register_peer(self, peer_id):
         try:
-            send_via_api(self.org_id, "register-peer", {"peerId": peer_id})
+            # Ensure peer_id is properly formatted
+            peer_id = str(peer_id).strip()
+            if not peer_id:
+                raise ValueError("Empty peer_id")
+                
+            logger.info(f"Registering peer [{peer_id}] for org [{self.org_id}]")
+            payload = {"peerId": peer_id}
+            logger.debug(f"register_peer payload: {payload}")
+            
+            send_via_api(self.org_id, "register-peer", payload)
+            logger.info(f"Successfully registered peer [{peer_id}]")
+            
         except requests.exceptions.HTTPError as e:
             if e.response is None or e.response.status_code != 500:
                 raise
-
+            logger.warning(f"Error response from register-peer endpoint: {e.response.text if e.response else 'No response'}")
             logger.info("Unknown error calling register-peer endpoint! Continuing.")
-            # TODO: Verify actual contract errors.
-            # logger.info(f"Peer ID [{peer_id}] is already registered! Continuing.")
 
     def submit_winners(self, round_num, winners):
         try:
-            args = (
-                self.org_id,
-                "submit-winner",
-                {"roundNumber": round_num, "winners": winners},
-            )
-            send_via_api(
-                *args
-            )
+            # Validate input
+            if not isinstance(winners, list):
+                raise ValueError(f"winners must be a list, got {type(winners)}")
+                
+            logger.info(f"Submitting {len(winners)} winners for round {round_num}")
+            payload = {
+                "roundNumber": round_num,
+                "winners": winners
+            }
+            logger.debug(f"submit_winners payload: {payload}")
+            
+            send_via_api(self.org_id, "submit-winner", payload)
+            logger.info(f"Successfully submitted winners for round {round_num}")
+            
         except requests.exceptions.HTTPError as e:
             if e.response is None or e.response.status_code != 500:
                 raise
-
+            logger.warning(f"Error response from submit-winner endpoint: {e.response.text if e.response else 'No response'}")
             logger.info("Unknown error calling submit-winner endpoint! Continuing.")
-            # TODO: Verify actual contract errors.
-            # logger.info("Winners already submitted for this round! Continuing.")
 
 
 def send_via_api(org_id, method, args):
     # Construct URL and payload.
     url = MODAL_PROXY_URL + method
+    
+    # Ensure org_id is properly formatted
+    org_id = str(org_id).strip()
+    if not org_id:
+        raise ValueError("Empty org_id")
+        
     payload = {"orgId": org_id} | args
+    logger.debug(f"Sending request to {url}")
+    logger.debug(f"Request payload: {payload}")
 
-    # Send the POST request.
-    response = requests.post(url, json=payload)
-    response.raise_for_status()  # Raise an exception for HTTP errors
-    return response.json()
+    # Send the POST request with proper headers
+    response = requests.post(
+        url, 
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+    )
+    
+    try:
+        response.raise_for_status()
+        result = response.json()
+        logger.debug(f"Response: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"API request failed: {e}")
+        logger.error(f"Response status: {response.status_code}")
+        logger.error(f"Response text: {response.text}")
+        raise
 
 
 def setup_web3() -> Web3:
