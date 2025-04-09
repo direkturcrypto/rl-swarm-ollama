@@ -2,11 +2,12 @@ import os
 import yaml
 import torch
 import logging
+import requests
+import json
 from typing import Optional
 from dataclasses import dataclass
 from transformers import AutoTokenizer
 from datasets import load_dataset
-from ollama import Client
 import hivemind
 from hivemind.utils.logging import get_logger
 from hivemind.utils.telemetry import log_telemetry
@@ -45,7 +46,7 @@ def load_config(config_path: str) -> TrainingArguments:
 class OllamaTrainer:
     def __init__(self, args: TrainingArguments):
         self.args = args
-        self.client = Client(host=args.ollama_base_url)
+        self.base_url = args.ollama_base_url
         self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen-0.5B")
         self.dataset = load_dataset(args.dataset_id_or_path)
         
@@ -57,13 +58,21 @@ class OllamaTrainer:
         )
         
     def generate_response(self, prompt: str) -> str:
-        response = self.client.generate(
-            model=self.args.model_name,
-            prompt=prompt,
-            max_tokens=self.args.max_completion_length,
-            temperature=0.7
-        )
-        return response['response']
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.args.model_name,
+                    "prompt": prompt,
+                    "max_tokens": self.args.max_completion_length,
+                    "temperature": 0.7
+                }
+            )
+            response.raise_for_status()
+            return response.json()['response']
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return ""
     
     def train_step(self, batch):
         # Implement your training logic here

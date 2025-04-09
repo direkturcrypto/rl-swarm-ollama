@@ -55,7 +55,7 @@ pip install transformers>=4.46.0
 echo "Installing additional required packages..."
 pip install torch
 pip install datasets
-pip install ollama-python==0.1.2
+pip install requests
 
 while true; do
     read -p "Would you like to connect to the Testnet? [Y/n] " yn
