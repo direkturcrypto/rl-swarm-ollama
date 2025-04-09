@@ -28,6 +28,16 @@ HOST_MULTI_ADDRS=${HOST_MULTI_ADDRS:-$DEFAULT_HOST_MULTI_ADDRS}
 DEFAULT_IDENTITY_PATH="$ROOT"/swarm.pem
 IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
 
+# Setup virtual environment
+VENV_DIR="$ROOT/venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate virtual environment
+source "$VENV_DIR/bin/activate"
+
 while true; do
     read -p "Would you like to connect to the Testnet? [Y/n] " yn
     yn=${yn:-Y}  # Default to "Y" if the user presses Enter
@@ -101,21 +111,43 @@ if [ "$CONNECT_TO_TESTNET" = "True" ]; then
     # Set up trap to catch Ctrl+C and call cleanup
     trap cleanup INT
 fi
-#lets go!
-echo "Getting requirements..."
-pip install -r "$ROOT"/requirements-hivemind.txt > /dev/null
-pip install -r "$ROOT"/requirements.txt > /dev/null
+
+# Check if remote Ollama server is accessible
+REMOTE_OLLAMA_URL="http://107.222.215.224:36001"
+if ! curl -s "$REMOTE_OLLAMA_URL/api/tags" > /dev/null; then
+    echo "Error: Cannot connect to remote Ollama server at $REMOTE_OLLAMA_URL"
+    exit 1
+fi
+
+# Check if model exists on remote server and pull if needed
+echo "Checking for Qwen model on remote server..."
+if ! curl -s "$REMOTE_OLLAMA_URL/api/tags" | grep -q "qwen2.5:0.5b"; then
+    echo "Model not found on remote server. Pulling Qwen 0.5B model..."
+    curl -X POST "$REMOTE_OLLAMA_URL/api/pull" -d '{"name": "qwen2.5:0.5b"}'
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to pull model from remote server"
+        exit 1
+    fi
+    echo "Model pulled successfully"
+else
+    echo "Model already exists on remote server"
+fi
+
+# Install requirements in virtual environment
+echo "Installing requirements..."
+pip install -r "$ROOT"/requirements-hivemind.txt
+pip install -r "$ROOT"/requirements.txt
 
 if ! which nvidia-smi; then
    #You don't have a NVIDIA GPU
-   CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
+   CONFIG_PATH="$ROOT/hivemind_exp/configs/ollama/grpo-qwen-2.5-0.5b-ollama.yaml"
 elif [ -n "$CPU_ONLY" ]; then
    # ... or we don't want to use it
-   CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
+   CONFIG_PATH="$ROOT/hivemind_exp/configs/ollama/grpo-qwen-2.5-0.5b-ollama.yaml"
 else
    #NVIDIA GPU found
-   pip install -r "$ROOT"/requirements_gpu.txt > /dev/null
-   CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
+   pip install -r "$ROOT"/requirements_gpu.txt
+   CONFIG_PATH="$ROOT/hivemind_exp/configs/ollama/grpo-qwen-2.5-0.5b-ollama.yaml"
 fi
 
 echo ">> Done!"
@@ -139,13 +171,13 @@ echo ""
 echo "Good luck in the swarm!"
 
 if [ -n "$ORG_ID" ]; then
-    python -m hivemind_exp.gsm8k.train_single_gpu \
+    python -m hivemind_exp.gsm8k.train_ollama \
         --hf_token "$HUGGINGFACE_ACCESS_TOKEN" \
         --identity_path "$IDENTITY_PATH" \
         --modal_org_id "$ORG_ID" \
         --config "$CONFIG_PATH"
 else
-    python -m hivemind_exp.gsm8k.train_single_gpu \
+    python -m hivemind_exp.gsm8k.train_ollama \
         --hf_token "$HUGGINGFACE_ACCESS_TOKEN" \
         --identity_path "$IDENTITY_PATH" \
         --public_maddr "$PUB_MULTI_ADDRS" \
